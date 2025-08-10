@@ -1,0 +1,269 @@
+<html lang="tr"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ZType Türkçe — Klavye ile Uzay Savası</title>
+  <style>
+    :root{--bg:#050814;--fg:#e6f0ff;--accent:#5bd1ff}
+    html,body{height:100%;margin:0;font-family:Segoe UI, Roboto, "Helvetica Neue", Arial;background:var(--bg);color:var(--fg)}
+    canvas{display:block;margin:0 auto;background:linear-gradient(#051427,#00121a);box-shadow:0 8px 30px rgba(0,0,0,.6);border-radius:6px}
+    .wrap{max-width:960px;margin:18px auto;text-align:center}
+    h1{font-size:20px;margin:8px 0;color:var(--accent)}
+    p.small{margin:6px 0;color:#9fb0c4}
+    .controls{display:flex;gap:8px;justify-content:center;margin:10px 0}
+    button{background:#0b2a3a;border:1px solid rgba(255,255,255,.06);color:var(--fg);padding:8px 12px;border-radius:8px;cursor:pointer}
+    button.secondary{background:transparent;border:1px solid rgba(255,255,255,.06)}
+    .footer{margin-top:12px;color:#7f9fb5;font-size:13px}
+    .notice{font-size:13px;color:#cfeeff}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>ZType Türkçe — Klavye ile Uzay Savası</h1>
+    <p class="small">Türkçe kelimelerle oynanan ZType benzeri oyun. Klavyede yazdıkça düşmanları imha et. ENTER: EMP (sınırlı). Hata yaparsan seri bozulur.</p>
+    <div style="display:flex;justify-content:center;gap:12px;align-items:center;flex-wrap:wrap">
+      <div>
+        <button id="startBtn">Yeniden Başlat</button>
+        <button id="pauseBtn" class="secondary">Duraklat</button>
+      </div>
+      <div class="notice">Can: <span id="lives">0</span> • Seri: <span id="combo">1</span> • EMP: <span id="bombs">3</span></div>
+    </div>
+    <canvas id="game" width="900" height="520" tabindex="1000" style="outline: none;"></canvas>
+    <div class="controls">
+      <button id="addWords">Kelime Listesini Değiştir</button>
+      <button id="download">Oyunu İndir (.html)</button>
+    </div>
+    <div class="footer">Hazırlayan: ChatGPT — Türkçe kelime listesiyle. İstersen daha kısa/uzun kelimeler ya da konu bazlı listeler ekleyebilirim.</div>
+  </div>
+
+  <script>
+  // --- Basit ZType benzeri oyun (Türkçe kelimeler) ---
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const startBtn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const livesEl = document.getElementById('lives');
+  const comboEl = document.getElementById('combo');
+  const bombsEl = document.getElementById('bombs');
+  const addWordsBtn = document.getElementById('addWords');
+  const downloadBtn = document.getElementById('download');
+
+  let running=false, paused=false, score=0, lives=3, combo=1, bombs=3;
+  let spawnInterval = 1500; // ms
+  let lastSpawn = 0;
+  let enemies = [];
+  let typed = '';
+  let lastTime=0;
+  let levelSpeed = 0.4; // düşme hızı çarpanı
+  let wave = 1;
+
+  // Türkçe kelime listesi (farklı uzunluklarda, sık kullanılanlar)
+  let words = [
+  'merhaba','ev','okul','kitap','araba','bilgisayar','yazılım','kodlama','oyun','müzik','kalem','defter','masa','saat','telefon','çalışma','güneş','ay','yıldız','hayat',
+  'aşk','sevgi','arkadaş','aile','çocuk','şehir','köy','deniz','dağ','orman','yol','kapı','pencere','bahçe','çiçek','su','toprak','rüzgar','yağmur','dostluk',
+  'mutluluk','üzüntü','göz','el','ayak','kulak','burun','yüz','sağlık','hastane','doktor','öğrenci','öğretmen','ders','sınav','başarı','hata','deneme','gerçek','hayal',
+  'gözlem','bilgi','haber','gazete','televizyon','sinema','film','dünya','ülke','insan','hak','adalet','barış','savaş','tarih','gelecek','geçmiş','şimdi','zaman','an',
+  'lezzet','yemek','tatlı','çorba','ekmek','pilav','et','balık','sebze','meyve','elma','armut','muz','çilek','portakal','kedi','köpek','kuş','balon','uçak','gemi',
+  'yıldırım','ateş','ışık','karanlık','ses','müzik','şarkı','dans','resim','sanat','dansöz','oyuncu','yazar','şair','roman','öykü','hikaye','bilim','teknik','araç',
+  'yolculuk','bilet','havaalanı','istasyon','tren','otobüs','bisiklet','motor','durak','harita','adres','posta','mektup','mesaj','soru','cevap','fikir','tasarım','gözlük',
+  'bilgi','özet','uzman','internet','site','tarayıcı','sistem','veri','sunucu','kod','fonksiyon','değişken','dizayn','arayüz','kullanıcı','giriş','çıkış','kayıt','şifre'
+  ];
+
+  // Utility: rasgele
+  function rand(min,max){return Math.random()*(max-min)+min}
+
+  function spawnWord(){
+    const w = words[Math.floor(Math.random()*words.length)];
+    const x = Math.random()*(canvas.width-120)+60;
+    const y = -20;
+    const speed = levelSpeed + Math.random()*0.3 + wave*0.02;
+    enemies.push({x,y,word:w,progress:0,speed});
+  }
+
+  function resetGame(){
+    enemies = [];
+    typed='';
+    score=0; lives=3; combo=1; bombs=3; wave=1; levelSpeed=0.4; spawnInterval=1500;
+    livesEl.textContent = lives; comboEl.textContent = combo; bombsEl.textContent = bombs;
+  }
+
+  function update(dt){
+    // spawn
+    lastSpawn += dt;
+    if(lastSpawn > spawnInterval){
+      lastSpawn = 0;
+      spawnWord();
+    }
+
+    // update enemies
+    for(let i=enemies.length-1;i>=0;--i){
+      enemies[i].y += enemies[i].speed * dt * 0.06;
+      // check if reached bottom -> lose life
+      if(enemies[i].y > canvas.height - 60){
+        enemies.splice(i,1);
+        lives -= 1;
+        combo = 1;
+        if(lives<0) lives=0;
+        livesEl.textContent = lives;
+        comboEl.textContent = combo;
+        if(lives===0){ running=false; }
+      }
+    }
+
+    // level up based on score
+    const newWave = Math.floor(score/200)+1;
+    if(newWave !== wave){ wave=newWave; levelSpeed += 0.06; if(spawnInterval>500) spawnInterval -= 60; }
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // background stars
+    for(let i=0;i<100;i++){
+      // simple subtle starfield
+      ctx.fillStyle = 'rgba(255,255,255,0.03)';
+      ctx.fillRect((i*37)%canvas.width, (i*23)%canvas.height, 1,1);
+    }
+
+    // draw player ship
+    const shipX = canvas.width/2; const shipY = canvas.height-34;
+    ctx.fillStyle = '#79d0ff';
+    ctx.beginPath(); ctx.moveTo(shipX,shipY); ctx.lineTo(shipX-18,shipY+28); ctx.lineTo(shipX+18,shipY+28); ctx.closePath(); ctx.fill();
+
+    // draw enemies
+    ctx.font = '18px Arial';
+    for(const e of enemies){
+      // ship
+      ctx.fillStyle = '#e06';
+      ctx.beginPath(); ctx.ellipse(e.x,e.y,36,18,0,0,Math.PI*2); ctx.fill();
+      // word
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      // show typed progress in accent
+      const typedPart = e.word.slice(0, e.progress);
+      const rest = e.word.slice(e.progress);
+      // typed part
+      ctx.fillStyle = '#aeefff';
+      ctx.fillText(typedPart, e.x, e.y+6);
+      // rest
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(rest, e.x + ctx.measureText(typedPart).width/2, e.y+6);
+    }
+
+    // HUD
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '16px Arial';
+    ctx.fillText('Skor: '+score, 12, 22);
+    ctx.fillText('Dalg a: '+wave, 12, 42);
+    ctx.fillText('Yazdıkların: ' + typed, 12, canvas.height - 8);
+
+    if(!running){
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle = '#fff'; ctx.textAlign='center'; ctx.font='28px Arial';
+      ctx.fillText('Oyunu Başlatmak için BAŞLAT tuşuna bas', canvas.width/2, canvas.height/2-10);
+      ctx.font='16px Arial'; ctx.fillText('ENTER: EMP bomba (kalan: '+bombs+')', canvas.width/2, canvas.height/2+22);
+    }
+  }
+
+  function gameLoop(ts){
+    if(!lastTime) lastTime = ts; const dt = ts - lastTime; lastTime = ts;
+    if(running && !paused){ update(dt); }
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
+
+  // typing logic: we try to match typed string to the beginning of any enemy word.
+  function handleKey(k){
+    if(!running) return;
+    if(k === 'Enter'){
+      // EMP: destroy nearby or all small enemies when score>something or bombs>0
+      if(bombs>0){ bombs--; bombsEl.textContent = bombs; // clear half of enemies
+        const removeCount = Math.ceil(enemies.length/2);
+        enemies.splice(0,removeCount); combo = 1; comboEl.textContent = combo; return; }
+    }
+    if(k.length !== 1) return; // skip e.g. Shift
+    typed += k;
+
+    // find best matching enemy (closest to bottom prioritized?)
+    let matched = false;
+    // prefer enemies where typed matches start of word
+    for(let i=0;i<enemies.length;i++){
+      const e = enemies[i];
+      if(e.word.startsWith(typed)){
+        // update progress on only this enemy
+        e.progress = typed.length;
+        matched = true;
+        // if full word matched
+        if(e.progress === e.word.length){
+          // destroy
+          score += Math.floor(10 * combo * (1 + e.word.length/6));
+          combo += 1;
+          comboEl.textContent = combo;
+          // remove this enemy
+          enemies.splice(i,1);
+          typed = ''; // reset typed buffer
+          // increase difficulty slightly on kill
+          return;
+        }
+        // haven't finished yet: keep typed buffer
+        return;
+      } else {
+        // keep e.progress synced if previously partially typed
+        if(e.progress > 0) e.progress = 0;
+      }
+    }
+
+    // if no enemy matches typed buffer, it's a mistake -> penalize
+    if(!matched){
+      // small penalty: break combo and clear typed buffer (but not reduce lives)
+      typed = '';
+      combo = 1;
+      comboEl.textContent = combo;
+      // optional: subtract small score
+      score = Math.max(0, score - 5);
+    }
+  }
+
+  // global key listener
+  window.addEventListener('keydown', (ev)=>{
+    if(!running) return;
+    // prevent default for keys that would scroll
+    if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(ev.key)) ev.preventDefault();
+    handleKey(ev.key);
+  });
+
+  // start/pause
+  startBtn.addEventListener('click', ()=>{
+    if(!running){ resetGame(); running=true; paused=false; startBtn.textContent='Yeniden Başlat'; }
+    else { // restart
+      resetGame(); running=true; paused=false;
+    }
+  });
+  pauseBtn.addEventListener('click', ()=>{ if(!running) return; paused = !paused; pauseBtn.textContent = paused? 'Devam Ettir' : 'Duraklat'; });
+
+  // change word list (simple prompt to paste comma separated words)
+  addWordsBtn.addEventListener('click', ()=>{
+    const custom = prompt('Yeni kelimeleri virgülle ayırarak gir (ör: elma,armut,kitap). Mevcut kelimeleri değiştirmek için onayla.');
+    if(custom && custom.trim().length>0){
+      const arr = custom.split(',').map(s=>s.trim()).filter(Boolean);
+      if(arr.length>0){ words = arr; alert('Kelime listesi güncellendi. Toplam '+words.length+' kelime.'); }
+    }
+  });
+
+  // download current HTML file
+  downloadBtn.addEventListener('click', ()=>{
+    const blob = new Blob([document.documentElement.outerHTML], {type:'text/html'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'ztype-turkce.html'; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+  });
+
+  // focus canvas to capture keys even without input
+  canvas.tabIndex = 1000;
+  canvas.style.outline='none';
+  canvas.addEventListener('click', ()=>{ canvas.focus(); });
+
+  // initial draw + loop
+  requestAnimationFrame(gameLoop);
+  </script>
+
+
+</body></html>
